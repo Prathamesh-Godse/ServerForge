@@ -1,0 +1,23 @@
+[Unit]
+Description=ServerForge — Post-reboot stage runner
+# Wait for a full network stack before running.
+# This ensures apt, wget, and fail2ban downloads work after reboot.
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+# Substituted by main.sh on first run — do not edit this line directly.
+ExecStart=/bin/bash /home/<user>/serverforge/main.sh
+User=root
+Group=root
+# oneshot: the service runs once per boot activation and exits.
+# It does NOT restart automatically on failure — errors are logged
+# and the stage file retains the current stage for the next run.
+Type=oneshot
+RemainAfterExit=no
+# Route all stdout/stderr into the system journal for visibility.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
