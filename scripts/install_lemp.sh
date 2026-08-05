@@ -23,6 +23,9 @@ SERVER_CONF="$BASE_DIR/configs/server.conf"
 LOG_FILE="$BASE_DIR/serverforge.log"
 
 NGINX_DEFAULT_VHOST="/etc/nginx/sites-available/default"
+# Guarantee policy-rc.d is never left behind, on any exit path —
+# a stray one would silently block every future systemctl start.
+trap 'rm -f /usr/sbin/policy-rc.d' EXIT
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [LEMP] $1" | tee -a "$LOG_FILE"
@@ -71,12 +74,25 @@ log "Step 2/9 — Using Ubuntu archive nginx (no PPA — HTTP/3 unavailable)."
 log "Step 3/9 — Installing Nginx and modules..."
 log "  Modules: $NGINX_MODULES"
 
+# Block the package postinst from auto-starting nginx during install.
+# On IPv6-less hosts, an auto-start attempt fails (default vhost has
+# `listen [::]:80`), which makes apt/dpkg return non-zero for the
+# whole install — aborting the script before Step 4 below can even
+# run its fix. We patch the vhost ourselves and start manually at
+# Step 5 instead.
+cat > /usr/sbin/policy-rc.d <<'EOF'
+#!/bin/sh
+exit 101
+EOF
+chmod +x /usr/sbin/policy-rc.d
+
 apt install -y \
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confold" \
     nginx $NGINX_MODULES >> "$LOG_FILE" 2>&1
 
 if [ $? -ne 0 ]; then
+    rm -f /usr/sbin/policy-rc.d
     log "ERROR: Nginx installation failed."
     exit 1
 fi
@@ -104,6 +120,7 @@ fi
 
 # ── Step 5: Enable and start Nginx ───────────────────────────────
 log "Step 5/9 — Enabling and starting Nginx..."
+rm -f /usr/sbin/policy-rc.d
 systemctl enable nginx >> "$LOG_FILE" 2>&1
 systemctl start nginx >> "$LOG_FILE" 2>&1
 
