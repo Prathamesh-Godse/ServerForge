@@ -48,7 +48,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 separator
 log "Starting LEMP stack installation..."
-log "  Nginx PPA  : $NGINX_PPA"
+log "  Nginx      : $NGINX_PACKAGE (Ubuntu archive)"
 log "  PHP version: $PHP_VERSION"
 log "  PHP PPA    : $PHP_PPA"
 
