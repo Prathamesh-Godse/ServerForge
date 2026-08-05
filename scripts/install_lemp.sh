@@ -48,7 +48,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 separator
 log "Starting LEMP stack installation..."
-log "  Nginx      : $NGINX_PACKAGE (Ubuntu archive)"
+log "  Nginx PPA  : $NGINX_PPA"
 log "  PHP version: $PHP_VERSION"
 log "  PHP PPA    : $PHP_PPA"
 
@@ -61,11 +61,19 @@ if [ $? -ne 0 ]; then
 fi
 log "Package index refreshed."
 
-# ── Step 2: Nginx source ──────────────────────────────────────────
-# ondrej/nginx PPA now requires a paid Launchpad subscription and
-# can't be added anonymously. Installing from Ubuntu's default
-# archive instead — no PPA needed. No HTTP/3/QUIC as a result.
-log "Step 2/9 — Using Ubuntu archive nginx (no PPA — HTTP/3 unavailable)."
+# ── Step 2: Add Nginx PPA ─────────────────────────────────────────
+log "Step 2/9 — Adding Nginx PPA: $NGINX_PPA"
+if grep -rq "ondrej/nginx" /etc/apt/sources.list.d/ 2>/dev/null; then
+    log "  Nginx PPA already present — skipping add."
+else
+    add-apt-repository -y "$NGINX_PPA" >> "$LOG_FILE" 2>&1
+    if [ $? -ne 0 ]; then
+        log "ERROR: Failed to add Nginx PPA."
+        exit 1
+    fi
+    apt update -qq >> "$LOG_FILE" 2>&1
+    log "  Nginx PPA added and package index refreshed."
+fi
 
 # ── Step 3: Install Nginx and modules ────────────────────────────
 log "Step 3/9 — Installing Nginx and modules..."
