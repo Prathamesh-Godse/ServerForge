@@ -210,8 +210,11 @@ ssl_session_tickets off;
 # Once ALL subdomains use HTTPS, add 'includeSubDomains;' to the header.
 add_header Strict-Transport-Security "max-age=31536000;" always;
 
-# HTTP/3/QUIC intentionally omitted — Ubuntu's stock nginx package
-# is not built with --with-http_v3_module.
+# HTTP/3 and QUIC — advertise availability and enable QUIC retry
+ssl_early_data on;
+add_header Alt-Svc 'h3=":$server_port"; ma=86400';
+add_header x-quic 'H3';
+quic_retry on;
 EOF
     log "  ssl_all_sites.conf written."
 fi
@@ -240,8 +243,10 @@ server {
     listen 443 ssl;
     http2  on;
 
-    # HTTP/3/QUIC not enabled — Ubuntu's stock nginx package lacks
-    # --with-http_v3_module.
+    # HTTP/3 via QUIC — reuseport is for the FIRST site on the server only.
+    # For any additional site, use: listen 443 quic;  (no reuseport)
+    listen 443 quic reuseport;
+    http3  on;
 
     server_name ${SITE_DOMAIN} www.${SITE_DOMAIN};
 
@@ -383,11 +388,12 @@ log "  ✔ Certificate     : ${CERT_DIR}/fullchain.pem"
 log "  ✔ DH parameters   : $DHPARAM"
 log "  ✔ Site SSL conf   : $SITE_SSL_CONF"
 log "  ✔ Shared SSL conf : $ALL_SSL_CONF"
-log "  ✔ Nginx block     : HTTP redirect + HTTPS with HTTP/2 (no HTTP/3 — see notes)"
+log "  ✔ Nginx block     : HTTP redirect + HTTPS with HTTP/2 + HTTP/3"
 log "  ✔ WP-CLI          : $WP_CLI_BIN"
 log "  ✔ Renewal cron    : 1:00 AM on 14th + 28th monthly"
 log ""
 log "  Verify your setup (manual steps):"
 log "    SSL rating : https://www.ssllabs.com/ssltest/?d=${SITE_DOMAIN}"
+log "    HTTP/3     : https://http3check.net/?host=${SITE_DOMAIN}"
 log "    Redirects  : curl -I http://${SITE_DOMAIN}"
 log "                 curl -I https://${SITE_DOMAIN}"
