@@ -236,12 +236,14 @@ server {
 # HTTPS server block
 server {
 
-    # SSL + HTTP/2
-    listen 443 ssl;
-    http2  on;
+    # SSL + HTTP/2 — nginx 1.24 (Ubuntu Noble's stock package) requires
+    # http2 as a listen parameter; the standalone `http2 on;` directive
+    # only exists on nginx 1.25.1+, which we're not running since we
+    # dropped the ondrej PPA in favor of Ubuntu's archive package.
+    listen 443 ssl http2;
 
     # HTTP/3/QUIC not enabled — Ubuntu's stock nginx package lacks
-    # --with-http_v3_module.
+    # --with-http_v3_module. Revisit if switching to nginx.org's repo.
 
     server_name ${SITE_DOMAIN} www.${SITE_DOMAIN};
 
