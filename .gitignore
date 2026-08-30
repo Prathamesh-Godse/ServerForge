@@ -1,1 +1,15 @@
+# Runtime state — regenerated on every run, shouldn't carry stale
+# stage numbers or log history between clones/forks.
+current_stage.txt
+serverforge.log
 
+# Credentials file written by install_wordpress.sh (Stage 15)
+serverforge-*-credentials.txt
+
+# Installed systemd unit is generated from serverforge.service —
+# never meant to live in the repo itself.
+*.service.installed
+
+# Editor / OS noise
+.DS_Store
+*.swp
