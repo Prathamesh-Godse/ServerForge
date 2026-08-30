@@ -8,24 +8,28 @@
 # at the correct stage each time the server comes back up.
 #
 # Stage map:
-#   1  →  System Updates           (reboot)
-#   2  →  Timezone                 (reboot)
-#   3  →  Firewall                 (reboot)
-#   4  →  Fail2ban                 (reboot)
-#   5  →  Swap                     (reboot)
-#   6  →  Kernel Hardening         (reboot)
-#   7  →  fstab Hardening          (reboot)
-#   8  →  Open File Limits         (reboot)
-#   9  →  LEMP Stack Install       (no reboot — falls through)
-#   10 →  Nginx Hardening          (no reboot — falls through)
-#   11 →  MariaDB Hardening        (no reboot — falls through)
-#   12 →  MariaDB Optimization     (no reboot — falls through)
-#   13 →  PHP Hardening            (no reboot — falls through)
-#   14 →  Site Infrastructure      (no reboot — falls through)
-#   15 →  WordPress Install        (no reboot — setup complete)
+#   1  →  Mail Configuration       (no reboot — falls through)
+#   2  →  System Updates           (reboot)
+#   3  →  Timezone                 (reboot)
+#   4  →  Firewall                 (reboot)
+#   5  →  Fail2ban                 (reboot)
+#   6  →  Swap                     (reboot)
+#   7  →  Kernel Hardening         (reboot)
+#   8  →  fstab Hardening          (reboot)
+#   9  →  Open File Limits         (reboot)
+#   10 →  LEMP Stack Install       (no reboot — falls through)
+#   11 →  Nginx Hardening          (no reboot — falls through)
+#   12 →  MariaDB Hardening        (no reboot — falls through)
+#   13 →  MariaDB Optimization     (no reboot — falls through)
+#   14 →  PHP Hardening            (no reboot — falls through)
+#   15 →  Site Infrastructure      (no reboot — falls through)
+#   16 →  WordPress Install        (no reboot — setup complete)
 #
 # Requires an existing non-root sudo user with SSH access already
 # configured — this pipeline does not create users or harden SSH.
+# Requires configs/mail.conf to be filled in (ADMIN_EMAIL and Gmail
+# SMTP credentials) — Stage 1 sends a test email and fails the run
+# if it can't send, so bad credentials are caught immediately.
 #
 # Usage:
 #   sudo ./main.sh              # start or resume the sequence
@@ -35,6 +39,7 @@
 
 BASE_DIR="$(dirname "$(realpath "$0")")"
 CONFIG_FILE="$BASE_DIR/configs/server.conf"
+MAIL_CONFIG_FILE="$BASE_DIR/configs/mail.conf"
 LOG_FILE="$BASE_DIR/serverforge.log"
 STATE_FILE="$BASE_DIR/current_stage.txt"
 
@@ -42,7 +47,7 @@ SERVICE_NAME="serverforge"
 SERVICE_TEMPLATE="$BASE_DIR/${SERVICE_NAME}.service"
 SERVICE_DEST="/etc/systemd/system/${SERVICE_NAME}.service"
 
-TOTAL_STAGES=15
+TOTAL_STAGES=16
 
 # ── Logging ──────────────────────────────────────────────────────
 log() {
@@ -54,6 +59,25 @@ separator() {
         "$(date '+%Y-%m-%d %H:%M:%S')" \
         "════════════════════════════════════════════" \
         | tee -a "$LOG_FILE"
+}
+
+# ── Mail notifications ─────────────────────────────────────────────
+# Silently does nothing if mail isn't configured yet (e.g. Stage 1
+# itself is what failed — there's no working relay to notify with).
+send_notification() {
+    local subject="$1"
+    local body="$2"
+
+    if ! command -v msmtp &>/dev/null || [ -z "$ADMIN_EMAIL" ]; then
+        return 0
+    fi
+
+    {
+        echo "To: $ADMIN_EMAIL"
+        echo "Subject: $subject"
+        echo
+        echo "$body"
+    } | msmtp "$ADMIN_EMAIL" 2>>"$LOG_FILE"
 }
 
 # ── CLI flags ─────────────────────────────────────────────────────
@@ -86,6 +110,11 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 source "$CONFIG_FILE"
+
+# Mail config is sourced (for ADMIN_EMAIL) but not hard-required here —
+# configure_mail.sh (Stage 1) validates it and fails the run itself if
+# it's missing or the credentials don't work.
+[ -f "$MAIL_CONFIG_FILE" ] && source "$MAIL_CONFIG_FILE"
 
 if [ -z "$SERVER_USER" ] || [ "$SERVER_USER" = "<your-username>" ]; then
     echo "ERROR: SERVER_USER is not configured in $CONFIG_FILE"
@@ -156,6 +185,11 @@ run_stage() {
         log "ERROR: Stage $num ($label) failed (exit $exit_code)."
         log "       Fix the issue and re-run: sudo ./main.sh"
         log "       The stage will retry from here on next run."
+        send_notification "ServerForge FAILED — Stage $num ($label)" \
+"Stage $num ($label) failed with exit code $exit_code.
+
+Last 30 lines of $LOG_FILE:
+$(tail -30 "$LOG_FILE")"
         exit 1
     fi
 
@@ -187,85 +221,93 @@ install_service
 # ── Stage dispatch ────────────────────────────────────────────────
 case $STAGE in
     1)
-        run_stage 1 "System Updates" \
+        run_stage 1 "Mail Configuration" \
+            "$BASE_DIR/scripts/configure_mail.sh" "no"
+        # No reboot needed — re-source so ADMIN_EMAIL is available
+        # to send_notification for the rest of this run.
+        [ -f "$MAIL_CONFIG_FILE" ] && source "$MAIL_CONFIG_FILE"
+        STAGE=2
+        ;&
+
+    2)
+        run_stage 2 "System Updates" \
             "$BASE_DIR/scripts/system_updates.sh" "yes"
         ;;
 
-    2)
-        run_stage 2 "Timezone" \
+    3)
+        run_stage 3 "Timezone" \
             "$BASE_DIR/scripts/timezone.sh" "yes"
         ;;
 
-    3)
-        run_stage 3 "Firewall" \
+    4)
+        run_stage 4 "Firewall" \
             "$BASE_DIR/scripts/firewall.sh" "yes"
         ;;
 
-    4)
-        run_stage 4 "Fail2ban" \
+    5)
+        run_stage 5 "Fail2ban" \
             "$BASE_DIR/scripts/fail2ban.sh" "yes"
         ;;
 
-    5)
-        run_stage 5 "Swap" \
+    6)
+        run_stage 6 "Swap" \
             "$BASE_DIR/scripts/swap.sh" "yes"
         ;;
 
-    6)
-        run_stage 6 "Kernel Hardening" \
+    7)
+        run_stage 7 "Kernel Hardening" \
             "$BASE_DIR/scripts/kernel_hardening.sh" "yes"
         ;;
 
-    7)
-        run_stage 7 "fstab Hardening" \
+    8)
+        run_stage 8 "fstab Hardening" \
             "$BASE_DIR/scripts/fstab_hardening.sh" "yes"
         ;;
 
-    8)
-        run_stage 8 "Open File Limits" \
+    9)
+        run_stage 9 "Open File Limits" \
             "$BASE_DIR/scripts/open_file_limits.sh" "yes"
-        # Falls through after reboot to Stage 9
+        # Falls through after reboot to Stage 10
         ;;
 
-    9)
-        run_stage 9 "LEMP Stack Installation" \
-            "$BASE_DIR/scripts/install_lemp.sh" "no"
-        # No reboot needed — services start immediately
-        STAGE=10
-        ;&
-
     10)
-        run_stage 10 "Nginx Hardening & Optimization" \
-            "$BASE_DIR/scripts/configure_nginx.sh" "no"
+        run_stage 10 "LEMP Stack Installation" \
+            "$BASE_DIR/scripts/install_lemp.sh" "no"
         STAGE=11
         ;&
 
     11)
-        run_stage 11 "MariaDB Hardening" \
-            "$BASE_DIR/scripts/harden_mariadb.sh" "no"
+        run_stage 11 "Nginx Hardening & Optimization" \
+            "$BASE_DIR/scripts/configure_nginx.sh" "no"
         STAGE=12
         ;&
 
     12)
-        run_stage 12 "MariaDB Optimization" \
-            "$BASE_DIR/scripts/optimize_mariadb.sh" "no"
+        run_stage 12 "MariaDB Hardening" \
+            "$BASE_DIR/scripts/harden_mariadb.sh" "no"
         STAGE=13
         ;&
 
     13)
-        run_stage 13 "PHP Hardening & Optimization" \
-            "$BASE_DIR/scripts/harden_optimize_php.sh" "no"
+        run_stage 13 "MariaDB Optimization" \
+            "$BASE_DIR/scripts/optimize_mariadb.sh" "no"
         STAGE=14
         ;&
 
     14)
-        run_stage 14 "Site Infrastructure" \
-            "$BASE_DIR/scripts/setup_site_infrastructure.sh" "no"
+        run_stage 14 "PHP Hardening & Optimization" \
+            "$BASE_DIR/scripts/harden_optimize_php.sh" "no"
         STAGE=15
         ;&
 
     15)
-        run_stage 15 "WordPress Installation" \
+        run_stage 15 "Site Infrastructure" \
+            "$BASE_DIR/scripts/setup_site_infrastructure.sh" "no"
+        STAGE=16
+        ;&
+
+    16)
+        run_stage 16 "WordPress Installation" \
             "$BASE_DIR/scripts/install_wordpress.sh" "no"
 
         # ── All stages complete ───────────────────────────────────
@@ -278,27 +320,26 @@ case $STAGE in
 
         separator
         log "╔══════════════════════════════════════════════╗"
-        log "║   ServerForge — All 15 stages complete!      ║"
+        log "║   ServerForge — All 16 stages complete!      ║"
         log "╚══════════════════════════════════════════════╝"
         log ""
-        log "  Stages 1–8   ✔  OS hardening, kernel, limits"
-        log "  Stages 9–10  ✔  LEMP stack, Nginx config"
-        log "  Stages 11–13 ✔  MariaDB + PHP hardening"
-        log "  Stage  14    ✔  Web root + Nginx server block"
-        log "  Stage  15    ✔  WordPress files deployed"
+        log "  Stage   1    ✔  Mail configured"
+        log "  Stages 2–9   ✔  OS hardening, kernel, limits"
+        log "  Stages 10–11 ✔  LEMP stack, Nginx config"
+        log "  Stages 12–14 ✔  MariaDB + PHP hardening"
+        log "  Stage  15    ✔  Web root + Nginx server block"
+        log "  Stage  16    ✔  WordPress files deployed"
         log ""
         log "  Site: http://${SITE_DOMAIN}/"
         log ""
         log "  Remaining manual steps:"
         log "    □ Browser wizard: http://${SITE_DOMAIN}/ (if not done)"
-        log ""
-        log "  Not configured by this pipeline (trimmed out):"
-        log "    · SSH/user hardening — set this up yourself before running"
-        log "    · Mail (msmtp) notifications"
-        log "    · PHP-FPM per-site pool isolation"
-        log "    · SSL / HTTPS"
-        log "    · Nginx & WordPress application hardening"
         separator
+        send_notification "ServerForge complete" \
+"All 16 stages complete.
+
+Site is live at: http://${SITE_DOMAIN}/
+Finish the WordPress setup wizard there if you haven't already."
         disable_service
         ;;
 
