@@ -1,45 +1,60 @@
 # ServerForge
 
-Automated, reboot-persistent server hardening for Ubuntu/Debian.
-Runs a ten-stage sequence — surviving reboots between each stage —
-via a systemd one-shot service that installs itself on first launch
-and self-disables when the final stage completes.
+Automated, reboot-persistent provisioning for a single-site Ubuntu
+LEMP + WordPress server. Runs a fifteen-stage sequence — surviving
+reboots between each stage — via a systemd one-shot service that
+installs itself on first launch and self-disables when the final
+stage completes.
+
+ServerForge takes a fresh Ubuntu server with an existing sudo user
+and turns it into a running WordPress site: OS-level hardening
+(updates, firewall, fail2ban, kernel and filesystem tuning), then a
+tuned LEMP stack (Nginx, MariaDB, PHP-FPM), then the site itself.
+
+---
+
+## Requirements
+
+- **OS**: Ubuntu (uses the `ondrej/php` and `ondrej/nginx` PPAs, which
+  are Ubuntu-specific).
+- **Access**: run as root (`sudo ./main.sh`). A non-root sudo user must
+  already exist and have working SSH access — ServerForge configures
+  the server, it does not create accounts or touch SSH.
+- **DNS**: point `SITE_DOMAIN` at the server's IP before Stage 14
+  (Site Infrastructure) runs, so Nginx starts serving real traffic.
 
 ---
 
 ## Stage Map
 
 | Stage | Concept                  | Script                              | Reboots? |
-|-------|--------------------------|-------------------------------------|----------|
-| 1     | User Management          | `scripts/user_management.sh`        | No (→ 2) |
-| 2     | SSH Hardening            | `scripts/ssh_hardening.sh`          | Yes      |
-| 3     | System Updates           | `scripts/system_updates.sh`         | Yes      |
-| 4     | Timezone                 | `scripts/timezone.sh`               | Yes      |
-| 5     | Firewall                 | `scripts/firewall.sh`               | Yes      |
-| 6     | Fail2ban                 | `scripts/fail2ban.sh`               | Yes      |
-| 7     | Swap                     | `scripts/swap.sh`                   | Yes      |
-| 8     | Kernel Hardening         | `scripts/kernel_hardening.sh`       | Yes      |
-| 9     | fstab Hardening          | `scripts/fstab_hardening.sh`        | Yes      |
-| 10    | Open File Limits         | `scripts/open_file_limits.sh`       | Yes      |
-| 11    | LEMP Stack Installation  | `scripts/install_lemp.sh`           | No (→ 12)|
-| 12    | Mail (msmtp)             | `scripts/configure_mail.sh`         | No (→ 13)|
-| 13    | Nginx Hardening          | `scripts/configure_nginx.sh`        | No (→ 14)|
-| 14    | MariaDB Hardening        | `scripts/harden_mariadb.sh`         | No (→ 15)|
-| 15    | MariaDB Optimization     | `scripts/optimize_mariadb.sh`       | No (→ 16)|
-| 16    | PHP Hardening            | `scripts/harden_optimize_php.sh`    | No (→ 17)|
-| 17    | Site Infrastructure      | `scripts/setup_site_infrastructure.sh` | No (→ 18)|
-| 18    | WordPress Installation   | `scripts/install_wordpress.sh`         | No (→ 19)|
-| 19    | PHP-FPM Pool Isolation   | `scripts/configure_php_pool.sh`        | No (→ 20)|
-| 20    | WordPress Hardening      | `scripts/harden_wordpress.sh`          | No (→ 21)|
-| 21    | SSL / HTTPS              | `scripts/configure_ssl.sh`             | No (→ 22)|
-| 22    | Nginx App Hardening      | `scripts/nginx_application_hardening.sh` | No (→ 23)|
-| 23    | WordPress App Hardening  | `scripts/wordpress_application_hardening.sh` | No ★ |
+|-------|--------------------------|--------------------------------------|----------|
+| 1     | System Updates           | `scripts/system_updates.sh`          | Yes      |
+| 2     | Timezone                 | `scripts/timezone.sh`                | Yes      |
+| 3     | Firewall                 | `scripts/firewall.sh`                | Yes      |
+| 4     | Fail2ban                 | `scripts/fail2ban.sh`                | Yes      |
+| 5     | Swap                     | `scripts/swap.sh`                    | Yes      |
+| 6     | Kernel Hardening         | `scripts/kernel_hardening.sh`        | Yes      |
+| 7     | fstab Hardening          | `scripts/fstab_hardening.sh`         | Yes      |
+| 8     | Open File Limits         | `scripts/open_file_limits.sh`        | Yes      |
+| 9     | LEMP Stack Installation  | `scripts/install_lemp.sh`            | No (→ 10)|
+| 10    | Nginx Hardening          | `scripts/configure_nginx.sh`         | No (→ 11)|
+| 11    | MariaDB Hardening        | `scripts/harden_mariadb.sh`          | No (→ 12)|
+| 12    | MariaDB Optimization     | `scripts/optimize_mariadb.sh`        | No (→ 13)|
+| 13    | PHP Hardening            | `scripts/harden_optimize_php.sh`     | No (→ 14)|
+| 14    | Site Infrastructure      | `scripts/setup_site_infrastructure.sh` | No (→ 15)|
+| 15    | WordPress Installation   | `scripts/install_wordpress.sh`       | No ★     |
 
-★ After Stage 23, install the "Disable REST API" plugin manually in WordPress Admin
-and enable Cloudflare Hotlink Protection if applicable.
+★ After Stage 15, finish the WordPress install by completing the
+browser setup wizard at `http://${SITE_DOMAIN}/`.
 
-Stages 1→2 and 11→23 chain without reboots. Stages 2–10 each reboot.
-After Stage 23 the service disables itself permanently.
+Stages 9→15 chain without reboots. Stages 1–8 each reboot.
+After Stage 15 the service disables itself permanently.
+
+The site is served over plain HTTP, under a single shared PHP-FPM
+pool (`www-data`). There is no per-site pool isolation and no
+built-in TLS termination — put a reverse proxy or your own Certbot
+setup in front if you need HTTPS.
 
 ---
 
@@ -52,42 +67,31 @@ serverforge/
 ├── serverforge.log                   # All stage output, timestamped
 ├── configs/
 │   ├── server.conf                   # Identity, timezone, fail2ban
-│   ├── users.conf                    # User creation and SSH key
-│   ├── ssh.conf                      # SSH daemon hardening
 │   ├── firewall.conf                 # UFW port rules
 │   ├── swap.conf                     # Swap file size and path
 │   ├── kernel.conf                   # Kernel tuning: swappiness, IPv6, BBR
 │   ├── limits.conf                   # OS open file descriptor limit
 │   ├── lemp.conf                     # LEMP stack: PPAs, PHP version, modules
-│   ├── mail.conf                     # SMTP credentials for msmtp
 │   ├── nginx_settings.conf           # Nginx: worker limits, body size
 │   ├── mariadb.conf                  # MariaDB: InnoDB, binary logs, file limit
 │   ├── php.conf                      # PHP: upload limits, memory, rlimit
-│   └── site.conf                     # Site: domain, PHP, permissions, Certbot email
+│   └── site.conf                     # Site: domain, PHP version
 └── scripts/
-    ├── user_management.sh            # Stage 1
-    ├── ssh_hardening.sh              # Stage 2
-    ├── system_updates.sh             # Stage 3
-    ├── timezone.sh                   # Stage 4
-    ├── firewall.sh                   # Stage 5
-    ├── fail2ban.sh                   # Stage 6
-    ├── swap.sh                       # Stage 7
-    ├── kernel_hardening.sh           # Stage 8
-    ├── fstab_hardening.sh            # Stage 9
-    ├── open_file_limits.sh           # Stage 10
-    ├── install_lemp.sh               # Stage 11
-    ├── configure_mail.sh             # Stage 12
-    ├── configure_nginx.sh            # Stage 13
-    ├── harden_mariadb.sh             # Stage 14
-    ├── optimize_mariadb.sh           # Stage 15
-    ├── harden_optimize_php.sh        # Stage 16
-    ├── setup_site_infrastructure.sh  # Stage 17
-    ├── install_wordpress.sh          # Stage 18
-    ├── configure_php_pool.sh         # Stage 19
-    ├── harden_wordpress.sh           # Stage 20
-    ├── configure_ssl.sh              # Stage 21
-    ├── nginx_application_hardening.sh    # Stage 22
-    └── wordpress_application_hardening.sh # Stage 23
+    ├── system_updates.sh             # Stage 1
+    ├── timezone.sh                   # Stage 2
+    ├── firewall.sh                   # Stage 3
+    ├── fail2ban.sh                   # Stage 4
+    ├── swap.sh                       # Stage 5
+    ├── kernel_hardening.sh           # Stage 6
+    ├── fstab_hardening.sh            # Stage 7
+    ├── open_file_limits.sh           # Stage 8
+    ├── install_lemp.sh               # Stage 9
+    ├── configure_nginx.sh            # Stage 10
+    ├── harden_mariadb.sh             # Stage 11
+    ├── optimize_mariadb.sh           # Stage 12
+    ├── harden_optimize_php.sh        # Stage 13
+    ├── setup_site_infrastructure.sh  # Stage 14
+    └── install_wordpress.sh          # Stage 15
 ```
 
 ---
@@ -100,15 +104,12 @@ git clone https://github.com/Prathamesh-Godse/serverforge.git
 cd serverforge
 
 # 2. Configure — edit all config files before starting
-nano configs/server.conf         # SERVER_USER, TIMEZONE, fail2ban settings
-nano configs/users.conf          # SERVER_USER, USER_PASSWORD, SSH_PUBLIC_KEY
-nano configs/ssh.conf            # root login and password auth policy
+nano configs/server.conf         # SERVER_USER (must already exist), TIMEZONE, fail2ban settings
 nano configs/firewall.conf       # allowed/denied ports
 nano configs/swap.conf           # swap file size (default: 2 GB)
 nano configs/kernel.conf         # swappiness, IPv6, BBR, apport
 nano configs/limits.conf         # open file descriptor limit
 nano configs/lemp.conf           # PHP version, PPAs, extensions (defaults usually fine)
-nano configs/mail.conf           # SMTP host, user, App Password, from address
 nano configs/nginx_settings.conf # worker limits, body size (defaults usually fine)
 nano configs/site.conf           # SITE_DOMAIN — your domain name (required)
 
@@ -119,9 +120,9 @@ chmod +x main.sh scripts/*.sh
 sudo ./main.sh
 ```
 
-The server reboots **nine times** (after Stages 2–10). Each time it comes
-back up the service resumes at the next stage automatically. Stages 11–13
-run back-to-back without reboots. After Stage 13 completes the service
+The server reboots **eight times** (after Stages 1–8). Each time it comes
+back up the service resumes at the next stage automatically. Stages 9–15
+run back-to-back without reboots. After Stage 15 completes the service
 disables and removes itself.
 
 ---
@@ -132,33 +133,16 @@ disables and removes itself.
 
 | Variable            | Description                                        |
 |---------------------|----------------------------------------------------|
-| `SERVER_USER`       | Non-root username (must match `users.conf`)        |
+| `SERVER_USER`       | Non-root username — must already exist on the server |
 | `TIMEZONE`          | System timezone (e.g. `Asia/Kolkata`)              |
 | `FAIL2BAN_BANTIME`  | Ban duration (e.g. `7d`, `1h`, `-1` for permanent)|
 | `FAIL2BAN_FINDTIME` | Window for counting failures (e.g. `3h`)           |
 | `FAIL2BAN_MAXRETRY` | Failures before a ban is issued                    |
 
-### `configs/users.conf`
-
-| Variable         | Description                                           |
-|------------------|-------------------------------------------------------|
-| `SERVER_USER`    | Username to create (must match `server.conf`)         |
-| `USER_PASSWORD`  | Password for the new user                             |
-| `REMOVE_USERS`   | Space-separated list of cloud default users to delete |
-| `SSH_PUBLIC_KEY` | Public key string to inject into `authorized_keys`    |
-
-### `configs/ssh.conf`
-
-| Variable            | Description                                        |
-|---------------------|----------------------------------------------------|
-| `PERMIT_ROOT_LOGIN` | `yes` or `no` — whether root can log in via SSH   |
-| `PASSWORD_AUTH`     | `yes` or `no` — whether password login is allowed |
-| `SSH_DROPIN_FILE`   | Path to the cloud-init SSH drop-in config file    |
-
 ### `configs/firewall.conf`
 
 | Variable           | Description                                         |
-|--------------------|-----------------------------------------------------|
+|--------------------|-------------------------------------------------------|
 | `ALLOW`            | Comma-separated ports/services to allow             |
 | `DENY`             | Comma-separated ports to deny                       |
 | `DEFAULT_INCOMING` | `deny` or `allow`                                   |
@@ -175,7 +159,7 @@ disables and removes itself.
 ### `configs/kernel.conf`
 
 | Variable          | Description                                              |
-|-------------------|----------------------------------------------------------|
+|-------------------|------------------------------------------------------------|
 | `SWAPPINESS`      | Kernel swap eagerness: `1` = last resort (default: `1`)  |
 | `VFS_CACHE_PRESSURE` | Filesystem cache retention: lower = hold longer (default: `50`) |
 | `DISABLE_IPV6`    | `yes` or `no` — disables IPv6 via GRUB kernel parameter  |
@@ -184,33 +168,23 @@ disables and removes itself.
 ### `configs/limits.conf`
 
 | Variable       | Description                                               |
-|----------------|-----------------------------------------------------------|
+|----------------|-------------------------------------------------------------|
 | `NOFILE_LIMIT` | Max open file descriptors for all users (default: 120000) |
 
 ### `configs/lemp.conf`
 
 | Variable          | Description                                                     |
-|-------------------|-----------------------------------------------------------------|
+|-------------------|---------------------------------------------------------------------|
 | `NGINX_PPA`       | Ondrej Nginx PPA (default: `ppa:ondrej/nginx`)                  |
 | `PHP_VERSION`     | PHP version to install (default: `8.3`)                         |
 | `PHP_PPA`         | Ondrej PHP PPA (default: `ppa:ondrej/php`)                      |
 | `PHP_EXTENSIONS`  | Space-separated list of PHP extension names (no `php8.3-` prefix)|
 | `NGINX_MODULES`   | Space-separated Nginx module package names                       |
 
-### `configs/mail.conf`
-
-| Variable        | Description                                                         |
-|-----------------|---------------------------------------------------------------------|
-| `SMTP_HOST`     | SMTP relay hostname (default: `smtp.gmail.com`)                     |
-| `SMTP_PORT`     | SMTP port (default: `587`)                                          |
-| `SMTP_USER`     | Gmail address used for SMTP authentication                          |
-| `SMTP_PASSWORD` | 16-character Gmail App Password (not your account password)         |
-| `SMTP_FROM`     | From address on outbound email (must match `SMTP_USER` for Gmail)   |
-
 ### `configs/nginx_settings.conf`
 
 | Variable                      | Description                                               |
-|-------------------------------|-----------------------------------------------------------|
+|-------------------------------|---------------------------------------------------------------|
 | `NGINX_WORKER_RLIMIT_NOFILE`  | Open file descriptor limit per worker (default: `45000`)  |
 | `NGINX_WORKER_CONNECTIONS`    | Max simultaneous connections per worker (default: `4096`) |
 | `NGINX_CLIENT_MAX_BODY_SIZE`  | Max request body (default: `100m` — reduce to `8m` later)|
@@ -218,7 +192,7 @@ disables and removes itself.
 ### `configs/mariadb.conf`
 
 | Variable                          | Description                                              |
-|-----------------------------------|----------------------------------------------------------|
+|-----------------------------------|--------------------------------------------------------------|
 | `MARIADB_INNODB_BUFFER_POOL_SIZE` | InnoDB RAM cache — ~80% of server RAM (default: `800M`) |
 | `MARIADB_INNODB_LOG_FILE_SIZE`    | InnoDB redo log — ~25% of buffer pool (default: `200M`) |
 | `MARIADB_EXPIRE_LOGS_DAYS`        | Binary log retention in days (default: `3`)              |
@@ -241,10 +215,6 @@ disables and removes itself.
 |-------------------|----------------------------------------------------------------|
 | `SITE_DOMAIN`     | Bare domain name for the site (e.g. `example.com`) — required |
 | `SITE_PHP_VERSION`| PHP version for FastCGI socket (default: `8.3`)                |
-| `PERMISSION_MODE` | `hardened` (production) or `standard` (update phase)          |
-| `CERTBOT_EMAIL`   | Email for Let's Encrypt renewal notices — required for Stage 21|
-| `HOTLINK_PROTECTION` | `cloudflare` (default), `nginx`, or `disabled` (Stage 22) |
-| `DB_PRIVILEGE_HARDEN` | `yes` or `no` — restrict DB user to SELECT/INSERT/UPDATE/DELETE (Stage 23) |
 
 ---
 
@@ -254,30 +224,26 @@ Every line of output from every script is appended to `serverforge.log`
 in the project root. Each entry is timestamped and tagged with its source:
 
 ```
-2024-07-03 17:02:11 [MAIN]       Stage 1/13 — User Management
-2024-07-03 17:02:11 [USER_MGMT]  Starting user management...
-2024-07-03 17:05:33 [SSH_HARDEN] SSH hardening complete.
-2024-07-03 17:05:33 [MAIN]       Rebooting to apply changes (will resume at Stage 3)...
-2024-07-03 17:08:01 [MAIN]       ServerForge — Resuming at Stage 3 of 13
+2024-07-03 17:02:11 [MAIN]       Stage 1/15 — System Updates
+2024-07-03 17:02:11 [SYS_UPDATE] Starting system updates...
+2024-07-03 17:05:33 [SYS_UPDATE] System updates complete.
+2024-07-03 17:05:33 [MAIN]       Rebooting to apply changes (will resume at Stage 2)...
+2024-07-03 17:08:01 [MAIN]       ServerForge — Resuming at Stage 2 of 15
 ...
 2024-07-03 18:14:55 [LIMITS]     Open file limits configuration complete.
-2024-07-03 18:15:01 [MAIN]       Stage 11/13 — LEMP Stack Installation
+2024-07-03 18:15:01 [MAIN]       Stage 9/15 — LEMP Stack Installation
 2024-07-03 18:15:01 [LEMP]       Starting LEMP stack installation...
 2024-07-03 18:22:44 [LEMP]       LEMP stack installation complete.
-2024-07-03 18:22:44 [MAIN]       Stage 12/13 — Mail (msmtp)
-2024-07-03 18:22:44 [MAIL]       Starting mail (msmtp) configuration...
-2024-07-03 18:22:46 [MAIL]       Mail configuration complete.
-2024-07-03 18:22:46 [MAIN]       Stage 13/13 — Nginx Hardening & Optimization
-2024-07-03 18:22:46 [NGINX_CFG]  Starting Nginx hardening and optimization...
+2024-07-03 18:22:44 [MAIN]       Stage 10/15 — Nginx Hardening & Optimization
+2024-07-03 18:22:44 [NGINX_CFG]  Starting Nginx hardening and optimization...
 2024-07-03 18:22:49 [NGINX_CFG]  Nginx hardening and optimization complete.
-2024-07-03 18:22:49 [MAIN]       ServerForge setup complete!
+...
+2024-07-03 18:40:12 [MAIN]       ServerForge setup complete!
 ```
 
 | Tag               | Source script              |
-|-------------------|----------------------------|
+|-------------------|-----------------------------|
 | `[MAIN]`          | `main.sh`                  |
-| `[USER_MGMT]`     | `user_management.sh`       |
-| `[SSH_HARDEN]`    | `ssh_hardening.sh`         |
 | `[SYS_UPDATE]`    | `system_updates.sh`        |
 | `[TIMEZONE]`      | `timezone.sh`              |
 | `[FIREWALL]`      | `firewall.sh`              |
@@ -287,18 +253,12 @@ in the project root. Each entry is timestamped and tagged with its source:
 | `[FSTAB]`         | `fstab_hardening.sh`       |
 | `[LIMITS]`        | `open_file_limits.sh`      |
 | `[LEMP]`          | `install_lemp.sh`          |
-| `[MAIL]`          | `configure_mail.sh`        |
 | `[NGINX_CFG]`     | `configure_nginx.sh`       |
 | `[MARIADB_HARDEN]`| `harden_mariadb.sh`        |
 | `[MARIADB_OPT]`   | `optimize_mariadb.sh`      |
 | `[PHP_HARDEN]`    | `harden_optimize_php.sh`   |
 | `[SITE_INFRA]`    | `setup_site_infrastructure.sh` |
 | `[WP_INSTALL]`    | `install_wordpress.sh`         |
-| `[PHP_POOL]`      | `configure_php_pool.sh`        |
-| `[WP_HARDEN]`     | `harden_wordpress.sh`          |
-| `[SSL]`           | `configure_ssl.sh`             |
-| `[NGINX_APP]`     | `nginx_application_hardening.sh` |
-| `[WP_APP_HARDEN]` | `wordpress_application_hardening.sh` |
 
 ---
 
@@ -332,16 +292,10 @@ sudo ./main.sh --reset
 
 ## Important Notes
 
-- **SSH keys before disabling passwords** — If `PASSWORD_AUTH=no` in
-  `ssh.conf`, ensure `SSH_PUBLIC_KEY` is set in `users.conf` first.
-  Otherwise you will be locked out of the server after Stage 2.
-
-- **REMOVE_USERS safety guard** — The script will never remove the user
-  defined as `SERVER_USER`, even if it appears in the `REMOVE_USERS` list.
-
-- **SSH config backups** — `ssh_hardening.sh` backs up both `sshd_config`
-  and `50-cloud-init.conf` before modifying them (`.bak` extension).
-  If the `sshd -t` validation fails, the originals are restored automatically.
+- **SERVER_USER must already exist** — create your sudo user and
+  confirm you can SSH in *before* running `main.sh`; `SERVER_USER` in
+  `server.conf` must match an existing account or `main.sh` exits with
+  an error.
 
 - **fstab backups** — Both `swap.sh` and `fstab_hardening.sh` back up
   `/etc/fstab` to `/etc/fstab.bak` before making any changes.
@@ -351,7 +305,7 @@ sudo ./main.sh --reset
   parameter. If `update-grub` fails, the original is restored.
 
 - **Swap idempotency** — If a swap file already exists at `SWAP_PATH`
-  and is already in `/etc/fstab`, Stage 7 skips creation and logs the
+  and is already in `/etc/fstab`, Stage 5 skips creation and logs the
   current state without making any changes.
 
 - **fstab noatime** — `fstab_hardening.sh` detects the root filesystem
@@ -359,11 +313,11 @@ sudo ./main.sh --reset
   a warning and skips that step rather than corrupting fstab.
 
 - **suid_dumpable and apport** — If `fs.suid_dumpable` reads back as `2`
-  after Stage 8, it means Ubuntu's `apport` crash reporter is overriding
+  after Stage 6, it means Ubuntu's `apport` crash reporter is overriding
   it. Set `DISABLE_APPORT=yes` in `kernel.conf` (the default) to prevent
   this — the script stops and masks the apport service automatically.
 
-- **LEMP: IPv6 vhost fix** — If IPv6 was disabled in Stage 8, Nginx will
+- **LEMP: IPv6 vhost fix** — If IPv6 was disabled in Stage 6, Nginx will
   fail to start after install because the default vhost includes a
   `listen [::]:80` directive. `install_lemp.sh` automatically comments
   this out and backs up the original file before doing so.
@@ -371,16 +325,6 @@ sudo ./main.sh --reset
 - **LEMP: Nginx PPA name** — The PPA changed from `ppa:ondrej/nginx-mainline`
   to `ppa:ondrej/nginx` in April 2025. The default in `lemp.conf` is
   the current name. Update it if you add the PPA manually beforehand.
-
-- **Mail: Gmail App Password required** — Gmail rejects plain account
-  passwords for SMTP. An App Password must be created under Google
-  Account → Security → 2-Step Verification → App passwords. Set it as
-  `SMTP_PASSWORD` in `configs/mail.conf` before running Stage 12.
-
-- **Mail: PHP mail test is manual** — Testing `mail()` as `www-data`
-  requires temporarily setting the home directory to `755` to allow
-  `sudo -u www-data php` to read the test script. This is interactive
-  and intentionally not automated. See the procedure below.
 
 - **Nginx: nginx.conf is fully replaced** — `configure_nginx.sh` writes
   the entire `nginx.conf` from scratch rather than using `sed`. The
@@ -390,20 +334,20 @@ sudo ./main.sh --reset
 - **Nginx: client_max_body_size** — Set to `100m` by default to allow
   WordPress theme and plugin uploads during site setup. Change
   `NGINX_CLIENT_MAX_BODY_SIZE` to `8m` in `nginx_settings.conf` and
-  re-run Stage 13 once the site is fully configured.
+  re-run Stage 10 once the site is fully configured.
 
-- **Nginx: bash aliases** — Stage 13 appends aliases (`ngt`, `ngr`,
+- **Nginx: bash aliases** — Stage 10 appends aliases (`ngt`, `ngr`,
   `fpmr`, `ngin`, `ngsa`, `server_update`) to `~/.bash_aliases` for
   `SERVER_USER`. They become active on the next SSH login or after
   running `source ~/.bash_aliases`.
 
-- **MariaDB hardening is non-interactive** — Stage 14 runs the
+- **MariaDB hardening is non-interactive** — Stage 11 runs the
   equivalent SQL of `mysql_secure_installation` directly via
   `mysql -e` — no interactive prompts are needed. On Ubuntu, MariaDB
   root uses unix socket auth (no password), so `sudo mysql` is used
   throughout. The script is idempotent — safe to re-run.
 
-- **MariaDB InnoDB log file size requires a stop** — Stage 15 stops
+- **MariaDB InnoDB log file size requires a stop** — Stage 12 stops
   MariaDB before editing `50-server.cnf`, then starts it again. This
   is mandatory — changing `innodb_log_file_size` while MariaDB is
   running and then restarting can corrupt InnoDB tables. The script
@@ -412,54 +356,48 @@ sudo ./main.sh --reset
 - **InnoDB buffer pool sizing** — The default `MARIADB_INNODB_BUFFER_POOL_SIZE`
   of `800M` assumes a 1 GB RAM server. Scale it to ~80% of your actual
   RAM: `2 GB → 1600M`, `4 GB → 3200M`. Update `configs/mariadb.conf`
-  before Stage 15 runs.
+  before Stage 12 runs.
 
-- **MySQLTuner** — Stage 15 downloads `mysqltuner.pl` to
+- **MySQLTuner** — Stage 12 downloads `mysqltuner.pl` to
   `~/MySQLTuner/`. Do **not** run it immediately — MySQLTuner needs
   the server to have been under real load for 60–90 days before its
   recommendations are meaningful. Run it periodically as a health check:
   `sudo ~/MySQLTuner/mysqltuner.pl`
 
-- **OPcache is intentionally deferred** — Stage 16 does not configure
-  OPcache. Each WordPress site will get its own PHP-FPM pool with a
-  dedicated OPcache instance. Configuring OPcache in the shared
-  `server_override.ini` here would apply a single global cache to all
-  pools, removing per-site isolation. OPcache is configured per pool.
+- **Single shared PHP-FPM pool** — All PHP execution runs under the
+  default `www-data` pool — there's no per-site pool isolation.
+  `display_errors = Off` globally (via `expose_php = Off`) suppresses
+  errors from browser output.
 
-- **PHP error logging is intentionally deferred** — Per-site PHP error
-  log paths are set inside each site's PHP-FPM pool config. The global
-  `display_errors = Off` (via `expose_php = Off`) ensures errors are
-  suppressed from browser output even before per-site logging is set up.
-
-- **allow_url_fopen per site** — Stage 16 sets `allow_url_fopen = Off`
+- **allow_url_fopen** — Stage 13 sets `allow_url_fopen = Off`
   globally. WordPress requires it to be `On` for plugin/theme updates
-  and the HTTP API. Enable it per-site in each pool config:
-  `php_admin_flag[allow_url_fopen] = on`
+  and the HTTP API. If you need this, enable it manually in
+  `/etc/php/8.3/fpm/pool.d/www.conf` (or your active pool config).
 
-- **PHP-FPM restart vs reload** — Stage 16 uses `systemctl restart`
+- **PHP-FPM restart vs reload** — Stage 13 uses `systemctl restart`
   (not `reload`) for PHP-FPM. `rlimit_files` and `rlimit_core` changes
   in `php-fpm.conf` require re-launching the master process — a reload
   applies ini changes but does not change the process-level resource limits.
 
-- **DNS must be live before Stage 17** — `setup_site_infrastructure.sh`
+- **DNS must be live before Stage 14** — `setup_site_infrastructure.sh`
   creates the Nginx server block and reloads Nginx. Nginx will start
   accepting traffic for `SITE_DOMAIN` after reload. If DNS is not yet
   pointing to the server, the server block will exist but no real traffic
-  will hit it — this is fine. The browser wizard (Stage 18's manual step)
+  will hit it — this is fine. The browser wizard (Stage 15's manual step)
   requires DNS to be live and resolving correctly.
 
 - **Site domain is required** — `SITE_DOMAIN` in `configs/site.conf` must
-  be set before Stage 17 runs. The script will exit with an error if it is
+  be set before Stage 14 runs. The script will exit with an error if it is
   still the placeholder value `<your-domain.com>`.
 
-- **DB credentials are auto-generated** — Stage 18 generates random values
+- **DB credentials are auto-generated** — Stage 15 generates random values
   for the database name, username, password, and table prefix using
   `/dev/urandom`. These are written to `~/serverforge-${SITE_DOMAIN}-credentials.txt`
   (chmod 600). The file also has placeholder fields for the WordPress admin
   credentials you create during the browser wizard — fill them in and store
   the file in a password manager.
 
-- **WordPress browser wizard is manual** — Stage 18 deploys the WordPress
+- **WordPress browser wizard is manual** — Stage 15 deploys the WordPress
   files and configures `wp-config.php`, but the final database table
   creation and admin account setup require navigating to
   `http://${SITE_DOMAIN}/` in a browser to complete the wizard.
@@ -471,143 +409,27 @@ sudo ./main.sh --reset
   - Users → Profile → update Nickname and "Display name publicly as"
   - Install a maintenance mode plugin while configuring the site
 
-- **FastCGI socket will change** — Stage 17 creates the server block
-  pointing to the default PHP-FPM socket (`php8.3-fpm.sock`). When
-  PHP-FPM pool isolation is configured in a later stage, the socket path
-  in the server block will be updated to the site-specific pool socket.
+- **FastCGI socket** — Stage 14 creates the server block pointing to
+  the default PHP-FPM socket (`php8.3-fpm.sock`), matching the shared
+  pool set up in Stage 9.
 
 - **Browser caching and FastCGI include files** — `browser_caching.conf`
   and `fastcgi_optimize.conf` are written to `/etc/nginx/includes/` in
-  Stage 17. They are referenced from the server block and any future
+  Stage 14. They are referenced from the server block and any future
   server blocks via a single `include` directive each.
 
 ---
 
-## PHP Mail Test (Manual — Post Stage 12)
+## Security Notes
 
-Testing PHP's `mail()` function running as `www-data` requires a brief
-home directory permission change. Run these commands manually after
-Stage 12 completes:
-
-```bash
-# 1. Temporarily allow www-data to read from the home directory
-sudo chmod 755 /home/$USER/
-
-# 2. Create a test script
-cat > ~/php_mail_test.php << 'EOF'
-<?php
-    ini_set('display_errors', 1);
-    error_reporting(E_ALL);
-    $from    = "your.address@gmail.com";  // must match SMTP_FROM in mail.conf
-    $to      = "recipient@example.com";
-    $subject = "PHP Mail Test";
-    $message = "Testing PHP mail() via msmtp";
-    $headers = "From:" . $from;
-    mail($to, $subject, $message, $headers);
-    echo "Test email sent\n";
-?>
-EOF
-
-# 3. Run as www-data
-sudo -u www-data php ~/php_mail_test.php
-
-# 4. Check the PHP mail log
-sudo cat /var/log/msmtp.log
-
-# 5. Restore home directory permissions
-sudo chmod 750 /home/$USER/
-
-# 6. Remove the test script
-rm ~/php_mail_test.php
-```
-
----
-
-## Pool User, Hardened Permissions & SSL — Key Notes
-
-**Pool username derivation (Stage 19)** — The PHP-FPM pool user is
-auto-derived from the first DNS label of `SITE_DOMAIN`: `example.com → example`,
-`mysite.co.uk → mysite`. This system user has no login shell and no home
-directory. It owns the site files and is the identity under which PHP runs.
-Group changes (cross-membership of www-data ↔ pool user) require the admin
-to reconnect via SSH before they take effect in an interactive session.
-
-**PERMISSION_MODE toggle (Stage 20)** — `hardened` locks WordPress core to
-read-only (`550`/`440`) while keeping `wp-content/` writable. To run WordPress
-core or plugin updates:
-1. Set `PERMISSION_MODE=standard` in `configs/site.conf`
-2. Re-run Stage 20: `sudo ./main.sh --reset` then advance to Stage 20
-3. Perform updates in WordPress admin
-4. Set `PERMISSION_MODE=hardened` and re-run Stage 20
-
-`wp-config.php` is always locked to `440` regardless of mode.
-
-**open_basedir and plugin compatibility (Stage 20)** — PHP is sandboxed to
-`public_html/` and the site-local `tmp/`. If a plugin fails with a file
-access error, check `/var/log/fpm-php.POOL_USER.log`. Add the required path
-to `open_basedir` in the pool config (`/etc/php/8.3/fpm/pool.d/DOMAIN.conf`)
-and reload PHP-FPM.
-
-**disable_functions and plugin compatibility (Stage 20)** — Shell/process/
-POSIX functions are disabled globally per pool. If a plugin requires one
-(e.g. backup plugins that call `exec()`), remove it from `disable_functions`
-in the pool config after verifying it is needed by a trusted plugin.
-
-**DH parameter generation (Stage 21)** — `openssl dhparam -out dhparam.pem 2048`
-takes several minutes. This is normal — it computes a 2048-bit safe prime.
-The systemd service waits indefinitely; do not interrupt it. The file is
-written once to `/etc/nginx/ssl/dhparam.pem` and reused for all sites.
-
-**OCSP stapling is disabled** — Let's Encrypt removed OCSP stapling in May
-2025. Both `ssl_stapling` lines in `ssl_all_sites.conf` are commented out.
-Do not uncomment them when using Let's Encrypt certificates.
-
-**ssl_all_sites.conf is written once** — Stage 21 only creates
-`/etc/nginx/ssl/ssl_all_sites.conf` if it does not already exist. This is
-intentional — it is shared across all sites on the server. To regenerate
-it (e.g. to update cipher configuration), delete the file and re-run Stage 21.
-
-**reuseport on the QUIC listener (Stage 21)** — The HTTPS server block
-includes `listen 443 quic reuseport`. This must appear on the FIRST site
-only. For any additional site added later, use `listen 443 quic;` without
-`reuseport` to avoid a binding conflict.
-
-**SSL renewal cron (Stage 21)** — Two entries are added to the root crontab:
-force-renew at 01:00 on the 14th and 28th, Nginx reload at 02:00. The
-one-hour gap ensures Certbot finishes before Nginx picks up the new cert.
-The script checks for existing entries before adding — re-running is safe.
-
-**Certbot dry-run (Stage 21)** — Stage 21 runs `certbot renew --dry-run`
-automatically after setup. A failure means auto-renewal would also fail —
-fix DNS or port 80 accessibility before relying on the cron.
-
-**WordPress URL update (Stage 21)** — WP-CLI updates the WordPress site
-URLs from `http://` to `https://` automatically, but only if the browser
-wizard has already been completed (database tables must exist). If the
-wizard has not been run, the script logs the manual command and continues.
-After completing the wizard, run:
-```bash
-sudo -u POOL_USER wp option update siteurl 'https://DOMAIN' --path=/var/www/DOMAIN/public_html
-sudo -u POOL_USER wp option update home   'https://DOMAIN' --path=/var/www/DOMAIN/public_html
-```
----
-
-## Nginx Application & WordPress Application Hardening — Key Notes
-
-**browser_caching.conf is rewritten in Stage 22** — Nginx `add_header` directives do NOT inherit from parent server block contexts when a child `location` block defines its own `add_header`. Because each caching location block sets its own headers, `http_headers.conf` must be explicitly included inside every location block. Stage 22 rewrites `browser_caching.conf` from scratch to include `etag on`, `if_modified_since exact`, `Pragma "public"`, `try_files`, and the `http_headers.conf` include in each block.
-
-**nginx_security_directives.conf is static** — No site-specific values. The same file is included in every site's server block. The `xmlrpc.php` deny block is commented out by default — some plugins and mobile apps require XML-RPC. If it is not needed, uncomment it. Note that `xmlrpc.php` is already rate-limited in the per-site rate_limiting include regardless.
-
-**DDoS protection is handled at the CDN layer (section 44)** — Broad Nginx-level rate limiting is not applied because WordPress's legitimate traffic (REST API, plugin callbacks, WP-Cron, admin sessions) makes it impractical to set a threshold that stops attacks without also blocking real users. Enable Cloudflare proxy and configure DDoS protection rules in the Cloudflare dashboard instead.
-
-**limit_req_zone is global, location blocks are per-site** — Stage 22 inserts the `limit_req_zone $binary_remote_addr zone=wp:10m rate=30r/m;` directive into the `nginx.conf` http block once (guarded against duplicates). Each site gets its own `rate_limiting_${DOMAIN}.conf` include file with exact-match location blocks for `wp-login.php` and `xmlrpc.php`. The zone name `wp` is shared across all sites.
-
-**Hotlinking with Cloudflare (recommended)** — Set `HOTLINK_PROTECTION=cloudflare` (the default). Enable via: Cloudflare Dashboard → Domain → Scrape Shield → Hotlink Protection → ON. No Nginx config is written in this mode. If `HOTLINK_PROTECTION=nginx`, a `valid_referers` location block is written into the server block — but this will NOT work correctly when Cloudflare proxy is active, because Cloudflare's IPs appear as the referer.
-
-**DISALLOW_FILE_MODS blocks all dashboard file writes** — After Stage 23, WordPress cannot install, update, or delete plugins and themes from the admin dashboard. All updates must be done via SSH (`rsync` or WP-CLI). This is intentional — combined with `PERMISSION_MODE=hardened`, it prevents any PHP code running on the server from modifying WordPress core files.
-
-**DB privilege hardening will break WooCommerce** — `DB_PRIVILEGE_HARDEN=yes` reduces the WordPress database user to `SELECT, INSERT, UPDATE, DELETE` only. WooCommerce requires `CREATE`, `ALTER`, and `INDEX` during plugin activations and order processing. Set `DB_PRIVILEGE_HARDEN=no` for WooCommerce sites. For other sites, if a plugin fails to activate after this step, temporarily grant the additional privilege it needs during activation, then revoke again if it is not needed for ongoing operation.
-
-**REST API plugin must be installed manually (section 50)** — The WordPress REST API is publicly accessible by default, exposing endpoints like `/wp-json/wp/v2/users` (username enumeration). The "Disable REST API" plugin by Dave McHale restricts this to authenticated users. Install from WordPress Admin → Plugins → Add New Plugin → search "disable rest api". Test your page builder and plugins after activation — some require unauthenticated REST access for editor previews. This cannot be automated because plugin installation requires the WordPress admin dashboard (which requires the browser wizard to be complete first).
-
-**Verify security headers** — After Stage 22, check `https://securityheaders.com/?q=DOMAIN` to confirm all five headers are present. `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, and `Permissions-Policy` should all appear. Note that `Content-Security-Policy` is not configured — it requires per-site tuning based on the scripts and resources the WordPress theme and plugins load.
+- Traffic is served over plain HTTP. If you need TLS, terminate it at
+  a reverse proxy (e.g. Cloudflare, an upstream load balancer) or add
+  your own Certbot configuration — ServerForge doesn't manage
+  certificates.
+- SSH access and user accounts are entirely out of scope — lock down
+  SSH (key-only auth, no root login) before pointing this at a
+  public-facing server.
+- The WordPress database user retains full privileges, and the REST
+  API and admin dashboard file-write access are left at WordPress
+  defaults. If you need a more locked-down posture, apply it manually
+  after Stage 15.
