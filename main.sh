@@ -8,29 +8,24 @@
 # at the correct stage each time the server comes back up.
 #
 # Stage map:
-#   1  →  User Management          (no reboot — falls through to Stage 2)
-#   2  →  SSH Hardening            (reboot)
-#   3  →  System Updates           (reboot)
-#   4  →  Timezone                 (reboot)
-#   5  →  Firewall                 (reboot)
-#   6  →  Fail2ban                 (reboot)
-#   7  →  Swap                     (reboot)
-#   8  →  Kernel Hardening         (reboot)
-#   9  →  fstab Hardening          (reboot)
-#   10 →  Open File Limits         (reboot)
-#   11 →  LEMP Stack Install       (no reboot — falls through)
-#   12 →  Mail / msmtp             (no reboot — falls through)
-#   13 →  Nginx Hardening          (no reboot — falls through)
-#   14 →  MariaDB Hardening        (no reboot — falls through)
-#   15 →  MariaDB Optimization     (no reboot — falls through)
-#   16 →  PHP Hardening            (no reboot — falls through)
-#   17 →  Site Infrastructure      (no reboot — falls through)
-#   18 →  WordPress Install        (no reboot — falls through)
-#   19 →  PHP-FPM Pool             (no reboot — falls through)
-#   20 →  WordPress Hardening      (no reboot — falls through)
-#   21 →  SSL / HTTPS              (no reboot — falls through)
-#   22 →  Nginx App Hardening      (no reboot — falls through)
-#   23 →  WordPress App Hardening  (no reboot — setup complete)
+#   1  →  System Updates           (reboot)
+#   2  →  Timezone                 (reboot)
+#   3  →  Firewall                 (reboot)
+#   4  →  Fail2ban                 (reboot)
+#   5  →  Swap                     (reboot)
+#   6  →  Kernel Hardening         (reboot)
+#   7  →  fstab Hardening          (reboot)
+#   8  →  Open File Limits         (reboot)
+#   9  →  LEMP Stack Install       (no reboot — falls through)
+#   10 →  Nginx Hardening          (no reboot — falls through)
+#   11 →  MariaDB Hardening        (no reboot — falls through)
+#   12 →  MariaDB Optimization     (no reboot — falls through)
+#   13 →  PHP Hardening            (no reboot — falls through)
+#   14 →  Site Infrastructure      (no reboot — falls through)
+#   15 →  WordPress Install        (no reboot — setup complete)
+#
+# Requires an existing non-root sudo user with SSH access already
+# configured — this pipeline does not create users or harden SSH.
 #
 # Usage:
 #   sudo ./main.sh              # start or resume the sequence
@@ -47,7 +42,7 @@ SERVICE_NAME="serverforge"
 SERVICE_TEMPLATE="$BASE_DIR/${SERVICE_NAME}.service"
 SERVICE_DEST="/etc/systemd/system/${SERVICE_NAME}.service"
 
-TOTAL_STAGES=23
+TOTAL_STAGES=15
 
 # ── Logging ──────────────────────────────────────────────────────
 log() {
@@ -94,7 +89,14 @@ source "$CONFIG_FILE"
 
 if [ -z "$SERVER_USER" ] || [ "$SERVER_USER" = "<your-username>" ]; then
     echo "ERROR: SERVER_USER is not configured in $CONFIG_FILE"
-    echo "       Set it to your Linux username (e.g. andrew, admin)."
+    echo "       Set it to your existing Linux username (e.g. andrew, admin)."
+    exit 1
+fi
+
+if ! id "$SERVER_USER" &>/dev/null; then
+    echo "ERROR: SERVER_USER '$SERVER_USER' does not exist on this system."
+    echo "       This pipeline does not create users — create it first:"
+    echo "         adduser $SERVER_USER && usermod -aG sudo $SERVER_USER"
     exit 1
 fi
 
@@ -185,135 +187,86 @@ install_service
 # ── Stage dispatch ────────────────────────────────────────────────
 case $STAGE in
     1)
-        run_stage 1 "User Management" \
-            "$BASE_DIR/scripts/user_management.sh" "no"
-        # Fall through immediately to Stage 2 (no reboot needed here)
-        STAGE=2
-        ;&
-
-    2)
-        run_stage 2 "SSH Hardening" \
-            "$BASE_DIR/scripts/ssh_hardening.sh" "yes"
-        ;;
-
-    3)
-        run_stage 3 "System Updates" \
+        run_stage 1 "System Updates" \
             "$BASE_DIR/scripts/system_updates.sh" "yes"
         ;;
 
-    4)
-        run_stage 4 "Timezone" \
+    2)
+        run_stage 2 "Timezone" \
             "$BASE_DIR/scripts/timezone.sh" "yes"
         ;;
 
-    5)
-        run_stage 5 "Firewall" \
+    3)
+        run_stage 3 "Firewall" \
             "$BASE_DIR/scripts/firewall.sh" "yes"
         ;;
 
-    6)
-        run_stage 6 "Fail2ban" \
+    4)
+        run_stage 4 "Fail2ban" \
             "$BASE_DIR/scripts/fail2ban.sh" "yes"
         ;;
 
-    7)
-        run_stage 7 "Swap" \
+    5)
+        run_stage 5 "Swap" \
             "$BASE_DIR/scripts/swap.sh" "yes"
         ;;
 
-    8)
-        run_stage 8 "Kernel Hardening" \
+    6)
+        run_stage 6 "Kernel Hardening" \
             "$BASE_DIR/scripts/kernel_hardening.sh" "yes"
         ;;
 
-    9)
-        run_stage 9 "fstab Hardening" \
+    7)
+        run_stage 7 "fstab Hardening" \
             "$BASE_DIR/scripts/fstab_hardening.sh" "yes"
         ;;
 
-    10)
-        run_stage 10 "Open File Limits" \
+    8)
+        run_stage 8 "Open File Limits" \
             "$BASE_DIR/scripts/open_file_limits.sh" "yes"
-        # Falls through after reboot to Stage 11
+        # Falls through after reboot to Stage 9
         ;;
 
-    11)
-        run_stage 11 "LEMP Stack Installation" \
+    9)
+        run_stage 9 "LEMP Stack Installation" \
             "$BASE_DIR/scripts/install_lemp.sh" "no"
         # No reboot needed — services start immediately
+        STAGE=10
+        ;&
+
+    10)
+        run_stage 10 "Nginx Hardening & Optimization" \
+            "$BASE_DIR/scripts/configure_nginx.sh" "no"
+        STAGE=11
+        ;&
+
+    11)
+        run_stage 11 "MariaDB Hardening" \
+            "$BASE_DIR/scripts/harden_mariadb.sh" "no"
         STAGE=12
         ;&
 
     12)
-        run_stage 12 "Mail (msmtp)" \
-            "$BASE_DIR/scripts/configure_mail.sh" "no"
-        # No reboot needed — file writes only
+        run_stage 12 "MariaDB Optimization" \
+            "$BASE_DIR/scripts/optimize_mariadb.sh" "no"
         STAGE=13
         ;&
 
     13)
-        run_stage 13 "Nginx Hardening & Optimization" \
-            "$BASE_DIR/scripts/configure_nginx.sh" "no"
+        run_stage 13 "PHP Hardening & Optimization" \
+            "$BASE_DIR/scripts/harden_optimize_php.sh" "no"
         STAGE=14
         ;&
 
     14)
-        run_stage 14 "MariaDB Hardening" \
-            "$BASE_DIR/scripts/harden_mariadb.sh" "no"
+        run_stage 14 "Site Infrastructure" \
+            "$BASE_DIR/scripts/setup_site_infrastructure.sh" "no"
         STAGE=15
         ;&
 
     15)
-        run_stage 15 "MariaDB Optimization" \
-            "$BASE_DIR/scripts/optimize_mariadb.sh" "no"
-        STAGE=16
-        ;&
-
-    16)
-        run_stage 16 "PHP Hardening & Optimization" \
-            "$BASE_DIR/scripts/harden_optimize_php.sh" "no"
-        STAGE=17
-        ;&
-
-    17)
-        run_stage 17 "Site Infrastructure" \
-            "$BASE_DIR/scripts/setup_site_infrastructure.sh" "no"
-        STAGE=18
-        ;&
-
-    18)
-        run_stage 18 "WordPress Installation" \
+        run_stage 15 "WordPress Installation" \
             "$BASE_DIR/scripts/install_wordpress.sh" "no"
-        STAGE=19
-        ;&
-
-    19)
-        run_stage 19 "PHP-FPM Pool Isolation" \
-            "$BASE_DIR/scripts/configure_php_pool.sh" "no"
-        STAGE=20
-        ;&
-
-    20)
-        run_stage 20 "WordPress Hardening" \
-            "$BASE_DIR/scripts/harden_wordpress.sh" "no"
-        STAGE=21
-        ;&
-
-    21)
-        run_stage 21 "SSL / HTTPS" \
-            "$BASE_DIR/scripts/configure_ssl.sh" "no"
-        STAGE=22
-        ;&
-
-    22)
-        run_stage 22 "Nginx Application Hardening" \
-            "$BASE_DIR/scripts/nginx_application_hardening.sh" "no"
-        STAGE=23
-        ;&
-
-    23)
-        run_stage 23 "WordPress Application Hardening" \
-            "$BASE_DIR/scripts/wordpress_application_hardening.sh" "no"
 
         # ── All stages complete ───────────────────────────────────
         rm -f "$STATE_FILE"
@@ -323,33 +276,28 @@ case $STAGE in
         [ -f "$SITE_CONF" ] && SITE_DOMAIN=$(grep '^SITE_DOMAIN=' "$SITE_CONF" \
             | cut -d= -f2 | tr -d '"')
 
-        POOL_USER=$(echo "$SITE_DOMAIN" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
-
         separator
         log "╔══════════════════════════════════════════════╗"
-        log "║   ServerForge — All 23 stages complete!      ║"
+        log "║   ServerForge — All 15 stages complete!      ║"
         log "╚══════════════════════════════════════════════╝"
         log ""
-        log "  Stages 1–10  ✔  OS hardening, kernel, limits"
-        log "  Stages 11–13 ✔  LEMP stack, mail, Nginx config"
-        log "  Stages 14–16 ✔  MariaDB + PHP hardening"
-        log "  Stage  17    ✔  Web root + Nginx server block"
-        log "  Stage  18    ✔  WordPress files deployed"
-        log "  Stage  19    ✔  PHP-FPM pool: $POOL_USER"
-        log "  Stage  20    ✔  WordPress hardened (ownership, perms, open_basedir)"
-        log "  Stage  21    ✔  HTTPS + HTTP/3 + renewal cron"
-        log "  Stage  22    ✔  Nginx app hardening (headers, WAF, rate limiting)"
-        log "  Stage  23    ✔  WordPress app hardening (DISALLOW_FILE_MODS, DB perms)"
+        log "  Stages 1–8   ✔  OS hardening, kernel, limits"
+        log "  Stages 9–10  ✔  LEMP stack, Nginx config"
+        log "  Stages 11–13 ✔  MariaDB + PHP hardening"
+        log "  Stage  14    ✔  Web root + Nginx server block"
+        log "  Stage  15    ✔  WordPress files deployed"
         log ""
-        log "  Site: https://${SITE_DOMAIN}/"
+        log "  Site: http://${SITE_DOMAIN}/"
         log ""
         log "  Remaining manual steps:"
         log "    □ Browser wizard: http://${SITE_DOMAIN}/ (if not done)"
-        log "    □ REST API plugin: WP Admin → Plugins → Add New"
-        log "      Search: 'Disable REST API' by Dave McHale"
-        log "    □ Hotlinking (Cloudflare): Scrape Shield → Hotlink Protection → ON"
-        log "    □ SSL check: https://www.ssllabs.com/ssltest/?d=${SITE_DOMAIN}"
-        log "    □ Headers: https://securityheaders.com/?q=${SITE_DOMAIN}"
+        log ""
+        log "  Not configured by this pipeline (trimmed out):"
+        log "    · SSH/user hardening — set this up yourself before running"
+        log "    · Mail (msmtp) notifications"
+        log "    · PHP-FPM per-site pool isolation"
+        log "    · SSL / HTTPS"
+        log "    · Nginx & WordPress application hardening"
         separator
         disable_service
         ;;
