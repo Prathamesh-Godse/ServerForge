@@ -43,6 +43,9 @@ done
 # ── Install msmtp ──────────────────────────────────────────────
 # Non-interactive so any debconf prompts (e.g. AppArmor) don't hang
 # an unattended/rebooting run.
+log "Refreshing package index (Stage 1 runs before System Updates, so this hasn't happened yet)..."
+apt-get update >> "$LOG_FILE" 2>&1
+
 log "Installing msmtp and msmtp-mta..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y msmtp msmtp-mta >> "$LOG_FILE" 2>&1
 if [ $? -ne 0 ]; then
